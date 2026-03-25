@@ -16,9 +16,9 @@ st.set_page_config(
 
 st.markdown(
     """
-# 👁️ Diabetic Retinopathy Detection System  
-### AI-based screening for **Referable Diabetic Retinopathy (diagnosis ≥ 2)**  
-Upload a retinal fundus image to estimate a **calibrated DR probability** (temperature scaling) and a decision.
+# 👁️ Diabetic Retinopathy Detection System
+### AI-based screening for **Referable Diabetic Retinopathy (diagnosis ≥ 2)**
+Upload a retinal fundus image to estimate a **calibrated DR probability** and get an uncertainty-aware triage decision.
 """
 )
 
@@ -32,8 +32,11 @@ CALIB_PATH = os.path.join("models", "calibration.json")
 # Sidebar settings
 # ----------------------------
 st.sidebar.header("Settings")
-threshold = st.sidebar.slider("Decision threshold", 0.0, 1.0, 0.50, 0.01)
 img_size = st.sidebar.selectbox("Input image size", [224, 256, 300], index=0)
+
+# Optional: keep thresholds editable from sidebar
+low_thresh = st.sidebar.slider("Low triage threshold", 0.0, 1.0, 0.30, 0.01)
+high_thresh = st.sidebar.slider("High triage threshold", 0.0, 1.0, 0.70, 0.01)
 
 cfg = InferenceConfig(img_size=int(img_size), device="cpu")
 
@@ -46,8 +49,8 @@ def init_model():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"Model not found at: {MODEL_PATH}")
     model = load_model(MODEL_PATH, cfg)
-    T = load_temperature(CALIB_PATH)
-    return model, T
+    temperature = load_temperature(CALIB_PATH)
+    return model, temperature
 
 
 try:
@@ -99,20 +102,32 @@ with col2:
     st.write("Risk level")
     st.progress(min(max(prob, 0.0), 1.0))
 
-    pred = 1 if prob >= threshold else 0
-    if pred == 1:
-        st.error(f"⚠️ Referable DR (Positive) — Decision threshold: {threshold:.2f}")
-    else:
-        st.success(f"✅ Non-referable (Negative) — Decision threshold: {threshold:.2f}")
+    st.write("### Uncertainty-aware Triage Decision")
 
-    # Extra details (optional)
+    if prob < low_thresh:
+        st.success(
+            f"✅ Non-referable DR\n\n"
+            f"Calibrated probability = {prob:.4f} < {low_thresh:.2f}"
+        )
+    elif prob > high_thresh:
+        st.error(
+            f"⚠️ Referable DR (Positive)\n\n"
+            f"Calibrated probability = {prob:.4f} > {high_thresh:.2f}"
+        )
+    else:
+        st.warning(
+            f"🟡 Uncertain Case – Needs Expert Review\n\n"
+            f"Calibrated probability = {prob:.4f} is between {low_thresh:.2f} and {high_thresh:.2f}"
+        )
+
     with st.expander("Show calculation details"):
         st.code(
             f"raw_logit = {raw_logit:.6f}\n"
             f"T = {T:.6f}\n"
-            f"calibrated_logit = raw_logit / T = {raw_logit/T:.6f}\n"
+            f"calibrated_logit = raw_logit / T = {raw_logit / T:.6f}\n"
             f"prob = sigmoid(calibrated_logit) = {prob:.6f}\n"
-            f"decision = prob >= {threshold:.2f} => {pred}"
+            f"low_thresh = {low_thresh:.2f}\n"
+            f"high_thresh = {high_thresh:.2f}"
         )
 
 # ----------------------------
